@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Lommepenge">
+    <title>Budget Tracker</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --text-color: #ffffff;
+            --primary: #4CAF50;
+            --danger: #f44336;
+            --surface: #1e1e1e;
+            --accent: #FFC107;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-color); padding: env(safe-area-inset-top) 20px 20px; text-align: center; }
+        
+        .header { margin-top: 40px; margin-bottom: 30px; }
+        .balance-label { font-size: 1rem; color: #aaaaaa; text-transform: uppercase; letter-spacing: 1px; }
+        .balance-amount { font-size: 3.5rem; font-weight: bold; margin: 10px 0; color: var(--primary); }
+        
+        .card { background-color: var(--surface); padding: 20px; border-radius: 16px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        
+        /* Nyt Milestone Card */
+        .goal-card { background-color: #2a2200; border: 1px solid var(--accent); display: none; }
+        .goal-title { font-size: 1.2rem; color: var(--accent); margin-bottom: 10px; font-weight: bold; }
+        .goal-desc { font-size: 0.9rem; margin-bottom: 15px; color: #dddddd; }
+        .btn-goal { background-color: var(--accent); color: #000; }
+        
+        input { width: 100%; padding: 15px; margin-bottom: 10px; border: 1px solid #333; border-radius: 8px; background: #2c2c2c; color: white; font-size: 1rem; }
+        button { width: 100%; padding: 15px; background-color: var(--primary); color: white; border: none; border-radius: 8px; font-size: 1.1rem; font-weight: bold; cursor: pointer; }
+        button:active { opacity: 0.8; }
+        
+        .history { text-align: left; margin-top: 30px; }
+        .history h3 { font-size: 1.2rem; margin-bottom: 15px; color: #aaaaaa; }
+        .transaction { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #333; }
+        .t-desc { font-weight: 500; }
+        .t-date { font-size: 0.8rem; color: #888; }
+        .t-amount { font-weight: bold; color: var(--danger); }
+        .t-amount.positive { color: var(--accent); }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="balance-label">Tilgængeligt</div>
+        <div class="balance-amount" id="balanceDisplay">0 kr.</div>
+    </div>
+
+    <div class="card goal-card" id="goalCard">
+        <div class="goal-title">🎉 Milepæl Nået!</div>
+        <div class="goal-desc">Du har opsparet over 1.000 kr. Det er tid til at overføre 500 kr. til dit SU-lån via netbanken.</div>
+        <button class="btn-goal" onclick="paySUDebt()">Registrér 500 kr. overført</button>
+    </div>
+
+    <div class="card">
+        <input type="text" id="descInput" placeholder="Hvad har du købt? (f.eks. Kaffe)" autocomplete="off">
+        <input type="number" id="amountInput" placeholder="Beløb (kr.)" inputmode="decimal">
+        <button onclick="addExpense()">Registrér udgift</button>
+    </div>
+
+    <div class="history">
+        <h3>Seneste udgifter</h3>
+        <div id="historyList"></div>
+    </div>
+
+    <script>
+        // Konfiguration
+        const DAILY_ALLOWANCE = 49.31; // 1500 kr / (365/12) dage
+        const GOAL_THRESHOLD = 1000.00;
+        const GOAL_PAYMENT = 500.00;
+        
+        // State management
+        let state = JSON.parse(localStorage.getItem('budgetState')) || {
+            balance: 0,
+            lastUpdateDate: new Date().toISOString().split('T')[0],
+            transactions: []
+        };
+
+        function updateLogic() {
+            const today = new Date().toISOString().split('T')[0];
+            
+            if (state.lastUpdateDate !== today) {
+                const lastDate = new Date(state.lastUpdateDate);
+                const currentDate = new Date(today);
+                const diffTime = Math.abs(currentDate - lastDate);
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                
+                state.balance += (diffDays * DAILY_ALLOWANCE);
+                state.lastUpdateDate = today;
+                saveState();
+            }
+            render();
+        }
+
+        function addExpense() {
+            const desc = document.getElementById('descInput').value.trim();
+            const amount = parseFloat(document.getElementById('amountInput').value);
+
+            if (!desc || isNaN(amount) || amount <= 0) {
+                alert("Indtast venligst en gyldig beskrivelse og et beløb.");
+                return;
+            }
+
+            executeTransaction(desc, amount);
+        }
+
+        function paySUDebt() {
+            if (state.balance >= GOAL_PAYMENT) {
+                executeTransaction("Ekstraordinært afdrag: SU-lån", GOAL_PAYMENT, true);
+            }
+        }
+
+        function executeTransaction(desc, amount, isGoal = false) {
+            state.balance -= amount;
+            
+            state.transactions.unshift({
+                id: Date.now(),
+                date: new Date().toLocaleDateString('da-DK'),
+                desc: desc,
+                amount: amount,
+                isGoal: isGoal
+            });
+
+            if(state.transactions.length > 50) state.transactions.pop();
+
+            saveState();
+            
+            document.getElementById('descInput').value = '';
+            document.getElementById('amountInput').value = '';
+            
+            render();
+        }
+
+        function saveState() {
+            localStorage.setItem('budgetState', JSON.stringify(state));
+        }
+
+        function render() {
+            document.getElementById('balanceDisplay').innerText = state.balance.toFixed(2).replace('.', ',') + ' kr.';
+            
+            // Logik for visning af Milestone Card
+            const goalCard = document.getElementById('goalCard');
+            if (state.balance >= GOAL_THRESHOLD) {
+                goalCard.style.display = 'block';
+            } else {
+                goalCard.style.display = 'none';
+            }
+            
+            const historyList = document.getElementById('historyList');
+            historyList.innerHTML = '';
+            
+            state.transactions.forEach(t => {
+                const div = document.createElement('div');
+                div.className = 'transaction';
+                const amountClass = t.isGoal ? 't-amount positive' : 't-amount';
+                div.innerHTML = `
+                    <div>
+                        <div class="t-desc">${t.desc}</div>
+                        <div class="t-date">${t.date}</div>
+                    </div>
+                    <div class="${amountClass}">-${t.amount.toFixed(2).replace('.', ',')} kr.</div>
+                `;
+                historyList.appendChild(div);
+            });
+        }
+
+        updateLogic();
+    </script>
+</body>
+</html>
